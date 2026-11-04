@@ -37,6 +37,16 @@ impl MemorySchema {
         hnsw_ef_construction: u32,
     ) -> Vec<String> {
         let _ = (hnsw_m, hnsw_ef_construction);
+        let memory_embedding = if embedding_dim == 0 {
+            String::new()
+        } else {
+            format!("embedding: <F32; {}>, ", embedding_dim)
+        };
+        let summary_embedding = if embedding_dim == 0 {
+            String::new()
+        } else {
+            format!(", embedding: <F32; {}>", embedding_dim)
+        };
         vec![
             // ── Core memory items (with time-travel via Validity) ──
             format!(
@@ -45,10 +55,10 @@ impl MemorySchema {
                  session_id: String default '', \
                  speaker: String default '', document_date: Float default 0.0, \
                  metadata_json: String default '{{}}', \
-                 embedding: <F32; {}>, created_at: Float, updated_at: Float, \
+                 {}created_at: Float, updated_at: Float, \
                  event_start: Float default 0.0, event_end: Float default 0.0 }}",
                 Self::MEMORIES,
-                embedding_dim
+                memory_embedding
             ),
             // ── Knowledge-graph edges ──
             format!(
@@ -91,10 +101,9 @@ impl MemorySchema {
                 ":create {} {{ session_id: String => summary: String, \
                  speakers_json: String default '[]', \
                  key_topics_json: String default '[]', \
-                 document_date: Float default 0.0, \
-                 embedding: <F32; {}> }}",
+                 document_date: Float default 0.0{} }}",
                 Self::SUMMARIES,
-                embedding_dim
+                summary_embedding
             ),
         ]
     }
@@ -148,7 +157,11 @@ impl MemorySchema {
     }
 
     /// HNSW vector index on session summaries for semantic retrieval.
-    pub fn create_summaries_vector_index(embedding_dim: u32, hnsw_m: u32, hnsw_ef_construction: u32) -> String {
+    pub fn create_summaries_vector_index(
+        embedding_dim: u32,
+        hnsw_m: u32,
+        hnsw_ef_construction: u32,
+    ) -> String {
         format!(
             "::hnsw create {}:{} {{ dim: {}, m: {}, dtype: F32, \
              fields: [embedding], distance: Cosine, ef_construction: {} }}",

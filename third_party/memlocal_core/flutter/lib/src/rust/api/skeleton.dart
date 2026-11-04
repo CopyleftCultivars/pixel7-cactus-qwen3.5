@@ -19,11 +19,12 @@ Future<int> callDartClosure({
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Memlocal>>
 abstract class Memlocal implements RustOpaqueInterface {
   /// Store `content` as a memory of the given type (stored-name string, e.g. "factual",
-  /// "episodic", "spatial", ...) using a caller-supplied embedding. Returns the new id.
+  /// "episodic", "spatial", ...) with an optional caller-supplied embedding. Omit it
+  /// when the engine was opened in keyword-only mode. Returns the new id.
   Future<String> addMemory({
     required String content,
     required String kind,
-    required List<double> embedding,
+    Float64List? embedding,
   });
 
   /// Total stored memories (None = all types).
@@ -43,6 +44,18 @@ abstract class Memlocal implements RustOpaqueInterface {
       .instance
       .api
       .crateApiSkeletonMemlocalOpenInMemory(dimensions: dimensions);
+
+  /// Open a persistent keyword-only engine without allocating embedding storage or HNSW indexes.
+  static Future<Memlocal> openKeywordOnly({required String dbPath}) => RustLib
+      .instance
+      .api
+      .crateApiSkeletonMemlocalOpenKeywordOnly(dbPath: dbPath);
+
+  /// BM25 keyword search using the local full-text index.
+  Future<List<RecalledMemory>> searchKeyword({
+    required String query,
+    required int k,
+  });
 
   /// Semantic (HNSW) search using a caller-supplied query embedding. Returns the top-k recalled memories.
   Future<List<RecalledMemory>> searchSemantic({

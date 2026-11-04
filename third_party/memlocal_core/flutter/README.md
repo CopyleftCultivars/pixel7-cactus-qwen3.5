@@ -108,6 +108,7 @@ search:
 ```dart
 import 'package:memlocal/memlocal.dart';
 import 'package:path_provider/path_provider.dart';
+import 'dart:typed_data';
 
 Future<void> main() async {
   // 1. Initialize the Rust bridge before using any engine API.
@@ -132,7 +133,7 @@ Future<void> main() async {
   final id = await engine.addMemory(
     content: content,
     kind: 'factual',
-    embedding: embedding,
+    embedding: Float64List.fromList(embedding),
   );
 
   // 5. Recall: embed the query, then run semantic search for the top-k matches.
@@ -143,6 +144,31 @@ Future<void> main() async {
   }
 }
 ```
+
+### Keyword-only mode
+
+Apps that cannot run an embedding model can open the engine without vector
+storage or HNSW indexes. Add memories without an embedding and search them with
+BM25:
+
+    final engine = await Memlocal.openKeywordOnly(
+      dbPath: '/path/to/memlocal.db',
+    );
+    await engine.addMemory(
+      content: 'Our farm is in Valle del Cauca and grows yuca.',
+      kind: 'factual',
+    );
+    final matches = await engine.searchKeyword(query: 'Valle del Cauca', k: 5);
+
+Keyword search uses CozoDB's **Simple** tokenizer with lowercase, alphanumeric,
+and English stemming filters. In checks with farming vocabulary, search is
+case-insensitive (VALLE DEL CAUCA finds Valle del Cauca), and punctuation is
+treated as a separator (lengua vaca finds lengua-de-vaca). The English stemmer
+matched planta with plantas, but it does not provide Spanish language
+stemming. The current tokenizer did not match the accented token José; an ASCII
+token in the same phrase (San) did match. Accents and Spanish morphology
+therefore have limited recall. Empty and punctuation-only queries return no
+results. RecalledMemory.score is the BM25 ranking score, not a probability.
 
 ### The store → recall → reply pattern
 

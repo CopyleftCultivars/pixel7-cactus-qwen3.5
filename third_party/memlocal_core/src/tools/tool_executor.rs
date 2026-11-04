@@ -2355,17 +2355,17 @@ fn apply_query_aware_boosts(items: &mut [MemoryItem], query: &str) {
                 }
 
                 if query_lower.contains("summer")
-                    && matches!(valid_at.month(), 6 | 7 | 8)
+                    && matches!(valid_at.month(), 6..=8)
                 {
                     boost *= 1.15;
                 }
                 if query_lower.contains("spring")
-                    && matches!(valid_at.month(), 3 | 4 | 5)
+                    && matches!(valid_at.month(), 3..=5)
                 {
                     boost *= 1.15;
                 }
                 if (query_lower.contains("fall") || query_lower.contains("autumn"))
-                    && matches!(valid_at.month(), 9 | 10 | 11)
+                    && matches!(valid_at.month(), 9..=11)
                 {
                     boost *= 1.15;
                 }

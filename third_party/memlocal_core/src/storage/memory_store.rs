@@ -63,19 +63,23 @@ impl MemoryStore {
         }
 
         // Create indices
-        self.try_run(&MemorySchema::create_vector_index(
-            self.embedding_dim,
-            config.hnsw_m,
-            config.hnsw_ef_construction,
-        ));
+        if self.embedding_dim > 0 {
+            self.try_run(&MemorySchema::create_vector_index(
+                self.embedding_dim,
+                config.hnsw_m,
+                config.hnsw_ef_construction,
+            ));
+        }
         self.try_run(&MemorySchema::create_fts_index());
         self.try_run(&MemorySchema::create_lsh_index());
         self.try_run(&MemorySchema::create_triples_fts_index());
-        self.try_run(&MemorySchema::create_summaries_vector_index(
-            self.embedding_dim,
-            config.hnsw_m,
-            config.hnsw_ef_construction,
-        ));
+        if self.embedding_dim > 0 {
+            self.try_run(&MemorySchema::create_summaries_vector_index(
+                self.embedding_dim,
+                config.hnsw_m,
+                config.hnsw_ef_construction,
+            ));
+        }
         debug!("[MemoryStore] Indices ensured");
 
         // Verify
@@ -122,27 +126,44 @@ impl MemoryStore {
 
     /// Insert or update a memory item with its embedding.
     pub fn put_memory(&self, item: &MemoryItem, embedding: &[f32]) -> Result<()> {
+        if self.embedding_dim == 0 && !embedding.is_empty() {
+            return Err(MemlocalError::InvalidArgument(
+                "embeddings are disabled in keyword-only mode; pass no embedding".into(),
+            ));
+        }
+        if self.embedding_dim > 0 && embedding.len() != self.embedding_dim as usize {
+            return Err(MemlocalError::InvalidArgument(format!(
+                "expected an embedding with {} dimensions, got {}",
+                self.embedding_dim,
+                embedding.len()
+            )));
+        }
+
         let m = item.to_map();
-        let embedding_dv: Vec<DataValue> = embedding
-            .iter()
-            .map(|&f| DataValue::from(f as f64))
-            .collect();
+        let (embedding_column, embedding_value, embedding_assignment) = if self.embedding_dim == 0 {
+            ("", "", "")
+        } else {
+            (", embedding", ", vec($embedding)", ", embedding")
+        };
 
         // v4: Use ASSERT validity for time-travel support
         let script = format!(
             "?[id, vld, content, type, hash, user_id, agent_id, session_id, \
              speaker, document_date, \
-             metadata_json, embedding, created_at, updated_at, event_start, event_end] <- \
+             metadata_json{embedding_column}, created_at, updated_at, event_start, event_end] <- \
              [[$id, 'ASSERT', $content, $type, $hash, $user_id, $agent_id, $session_id, \
              $speaker, $document_date, \
-             $metadata_json, vec($embedding), $created_at, $updated_at, $event_start, $event_end]]\n\
+             $metadata_json{embedding_value}, $created_at, $updated_at, $event_start, $event_end]]\n\
              :put {} {{id, vld => content, type, hash, user_id, agent_id, session_id, \
              speaker, document_date, \
-             metadata_json, embedding, created_at, updated_at, event_start, event_end}}",
-            MemorySchema::MEMORIES
+             metadata_json{embedding_assignment}, created_at, updated_at, event_start, event_end}}",
+            MemorySchema::MEMORIES,
+            embedding_column = embedding_column,
+            embedding_value = embedding_value,
+            embedding_assignment = embedding_assignment,
         );
 
-        let params = BTreeMap::from([
+        let mut params = BTreeMap::from([
             ("id".into(), DataValue::Str(json_str(&m["id"]).into())),
             (
                 "content".into(),
@@ -162,22 +183,29 @@ impl MemoryStore {
                 "session_id".into(),
                 DataValue::Str(json_str(&m["session_id"]).into()),
             ),
-            ("speaker".into(), DataValue::Str(
-                item.metadata.get("speaker")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .into()
-            )),
-            ("document_date".into(), DataValue::from(
-                item.metadata.get("document_date")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0)
-            )),
+            (
+                "speaker".into(),
+                DataValue::Str(
+                    item.metadata
+                        .get("speaker")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .into(),
+                ),
+            ),
+            (
+                "document_date".into(),
+                DataValue::from(
+                    item.metadata
+                        .get("document_date")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0),
+                ),
+            ),
             (
                 "metadata_json".into(),
                 DataValue::Str(json_str(&m["metadata_json"]).into()),
             ),
-            ("embedding".into(), DataValue::List(embedding_dv)),
             (
                 "created_at".into(),
                 DataValue::from(m["created_at"].as_f64().unwrap_or(0.0)),
@@ -195,6 +223,13 @@ impl MemoryStore {
                 DataValue::from(m["invalid_at"].as_f64().unwrap_or(0.0)),
             ),
         ]);
+        if self.embedding_dim > 0 {
+            let embedding_dv: Vec<DataValue> = embedding
+                .iter()
+                .map(|&f| DataValue::from(f as f64))
+                .collect();
+            params.insert("embedding".into(), DataValue::List(embedding_dv));
+        }
 
         self.run_mutable(&script, params)?;
         Ok(())
@@ -362,17 +397,22 @@ impl MemoryStore {
     /// The memory's history is preserved — it just becomes invisible at "NOW".
     pub fn invalidate_memory(&self, id: &str) -> Result<()> {
         // RETRACT requires all value columns. Get current values, then retract.
+        let embedding_field = if self.embedding_dim == 0 {
+            ""
+        } else {
+            ", embedding"
+        };
         let script = format!(
             "?[id, vld, content, type, hash, user_id, agent_id, session_id, \
              speaker, document_date, \
-             metadata_json, embedding, created_at, updated_at, event_start, event_end] := \
+             metadata_json{embedding_field}, created_at, updated_at, event_start, event_end] := \
              *{rel}{{id, content, type, hash, user_id, agent_id, session_id, \
              speaker, document_date, \
-             metadata_json, embedding, created_at, updated_at, event_start, event_end, @ \"NOW\"}}, \
+             metadata_json{embedding_field}, created_at, updated_at, event_start, event_end, @ \"NOW\"}}, \
              id == $id, vld = 'RETRACT'\n\
              :put {rel} {{id, vld => content, type, hash, user_id, agent_id, session_id, \
              speaker, document_date, \
-             metadata_json, embedding, created_at, updated_at, event_start, event_end}}",
+             metadata_json{embedding_field}, created_at, updated_at, event_start, event_end}}",
             rel = MemorySchema::MEMORIES
         );
         let params = BTreeMap::from([("id".into(), DataValue::Str(id.into()))]);
@@ -504,6 +544,12 @@ impl MemoryStore {
         user_id: Option<&str>,
         memory_type: Option<MemoryType>,
     ) -> Result<Vec<MemoryItem>> {
+        if self.embedding_dim == 0 {
+            return Err(MemlocalError::InvalidArgument(
+                "semantic search is unavailable in keyword-only mode".into(),
+            ));
+        }
+
         let mut filter_parts = Vec::new();
         if let Some(uid) = user_id {
             filter_parts.push(format!("user_id == \"{}\"", escape_cozo_str(uid)));
@@ -561,10 +607,13 @@ impl MemoryStore {
     /// Full-text (BM25) search.
     pub fn search_text(&self, query: &str, k: usize) -> Result<Vec<MemoryItem>> {
         let sanitized = sanitize_fts_query(query);
-        if sanitized.is_empty() {
+        if sanitized.is_empty() || k == 0 {
             return Ok(vec![]);
         }
 
+        // FTS indexes can yield historical validity versions. Over-fetch and
+        // keep only the current value for each memory ID.
+        let fetch_k = k.saturating_mul(10).max(k);
         let bind_fields = "id, content, type, hash, user_id, agent_id, session_id, \
                            speaker, document_date, \
                            metadata_json, created_at, updated_at, \
@@ -575,7 +624,7 @@ impl MemoryStore {
 
         let script = format!(
             "?[{output_fields}, score] := ~{}:{}{{ {bind_fields} | \
-             query: $q, k: {k}, bind_score: score }}",
+             query: $q, k: {fetch_k}, bind_score: score }}",
             MemorySchema::MEMORIES,
             MemorySchema::FTS_INDEX,
         );
@@ -584,11 +633,21 @@ impl MemoryStore {
         let result = self.run_immutable(&script, params)?;
 
         let mut items = Vec::new();
+        let mut seen_ids = HashSet::new();
         for i in 0..result.rows.len() {
             let map = rows_to_json(&result, i);
             let item = MemoryItem::from_map(&map)?;
+            let Some(current) = self.get_memory(&item.id)? else {
+                continue;
+            };
+            if current.content != item.content || !seen_ids.insert(item.id.clone()) {
+                continue;
+            }
             let raw_score = map["score"].as_f64().unwrap_or(0.0);
             items.push(item.with_score(raw_score));
+            if items.len() == k {
+                break;
+            }
         }
         Ok(items)
     }
@@ -645,16 +704,24 @@ impl MemoryStore {
             .search_text(query, k)?
             .into_iter()
             .filter(|item| {
-                user_id.map(|uid| item.user_id.as_deref() == Some(uid)).unwrap_or(true)
-                    && memory_type.map(|kind| item.memory_type == kind).unwrap_or(true)
+                user_id
+                    .map(|uid| item.user_id.as_deref() == Some(uid))
+                    .unwrap_or(true)
+                    && memory_type
+                        .map(|kind| item.memory_type == kind)
+                        .unwrap_or(true)
             })
             .collect();
         let lsh_list: Vec<MemoryItem> = self
             .search_lsh(query, k)?
             .into_iter()
             .filter(|item| {
-                user_id.map(|uid| item.user_id.as_deref() == Some(uid)).unwrap_or(true)
-                    && memory_type.map(|kind| item.memory_type == kind).unwrap_or(true)
+                user_id
+                    .map(|uid| item.user_id.as_deref() == Some(uid))
+                    .unwrap_or(true)
+                    && memory_type
+                        .map(|kind| item.memory_type == kind)
+                        .unwrap_or(true)
             })
             .collect();
 
@@ -889,9 +956,7 @@ impl MemoryStore {
             })?;
 
         let to_ts = chrono::DateTime::parse_from_rfc3339(date_to)
-            .or_else(|_| {
-                chrono::DateTime::parse_from_rfc3339(&format!("{date_to}T23:59:59Z"))
-            })
+            .or_else(|_| chrono::DateTime::parse_from_rfc3339(&format!("{date_to}T23:59:59Z")))
             .map(|dt| dt.timestamp_millis() as f64 / 1000.0)
             .map_err(|e| {
                 MemlocalError::InvalidArgument(format!("invalid date_to '{date_to}': {e}"))
@@ -1385,14 +1450,38 @@ impl MemoryStore {
             MemorySchema::TRIPLES
         );
         let params = BTreeMap::from([
-            ("subject".into(), DataValue::Str(triple.subject.clone().into())),
-            ("predicate".into(), DataValue::Str(triple.predicate.clone().into())),
-            ("object".into(), DataValue::Str(triple.object.clone().into())),
-            ("memory_id".into(), DataValue::Str(triple.memory_id.clone().into())),
-            ("speaker".into(), DataValue::Str(triple.speaker.clone().into())),
-            ("mention_count".into(), DataValue::from(triple.mention_count as i64)),
-            ("last_mentioned".into(), DataValue::from(triple.last_mentioned)),
-            ("session_id".into(), DataValue::Str(triple.session_id.clone().into())),
+            (
+                "subject".into(),
+                DataValue::Str(triple.subject.clone().into()),
+            ),
+            (
+                "predicate".into(),
+                DataValue::Str(triple.predicate.clone().into()),
+            ),
+            (
+                "object".into(),
+                DataValue::Str(triple.object.clone().into()),
+            ),
+            (
+                "memory_id".into(),
+                DataValue::Str(triple.memory_id.clone().into()),
+            ),
+            (
+                "speaker".into(),
+                DataValue::Str(triple.speaker.clone().into()),
+            ),
+            (
+                "mention_count".into(),
+                DataValue::from(triple.mention_count as i64),
+            ),
+            (
+                "last_mentioned".into(),
+                DataValue::from(triple.last_mentioned),
+            ),
+            (
+                "session_id".into(),
+                DataValue::Str(triple.session_id.clone().into()),
+            ),
             ("confidence".into(), DataValue::from(triple.confidence)),
         ]);
         self.run_mutable(&script, params)?;
@@ -1500,7 +1589,9 @@ impl MemoryStore {
                 "?[subject, predicate, object, mention_count, last_mentioned] <- \
                  [[$s, $p, $o, {}, {}]]\n\
                  :update {} {{subject, predicate, object => mention_count, last_mentioned}}",
-                new_count, last_mentioned, MemorySchema::TRIPLES
+                new_count,
+                last_mentioned,
+                MemorySchema::TRIPLES
             );
             let params = BTreeMap::from([
                 ("s".into(), DataValue::Str(subject.into())),
@@ -1605,7 +1696,11 @@ impl MemoryStore {
             Err(_) => {
                 // Fallback: search all then filter by speaker
                 let all = self.search_triples_fts(query, k * 2)?;
-                Ok(all.into_iter().filter(|t| t.speaker == speaker).take(k).collect())
+                Ok(all
+                    .into_iter()
+                    .filter(|t| t.speaker == speaker)
+                    .take(k)
+                    .collect())
             }
         }
     }
@@ -1945,4 +2040,156 @@ fn rows_to_edges(result: &NamedRows) -> Result<Vec<MemoryEdge>> {
         edges.push(MemoryEdge::from_map(&map)?);
     }
     Ok(edges)
+}
+
+#[cfg(test)]
+mod keyword_only_tests {
+    use super::*;
+
+    #[test]
+    fn keyword_only_store_persists_memories_without_vectors() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("memlocal-keyword-only-{nonce}.db"));
+        let config = StorageConfig {
+            db_path: Some(path.to_string_lossy().into_owned()),
+            embedding_dimensions: 0,
+            ..StorageConfig::default()
+        };
+        let item = MemoryItem::new("Our farm is in Valle del Cauca", MemoryType::Factual);
+
+        {
+            let store = MemoryStore::open(&config, 0).expect("keyword-only store opens");
+            assert_eq!(store.memory_count(None).expect("empty count"), 0);
+            store
+                .put_memory(&item, &[])
+                .expect("memory stores without a vector");
+            assert_eq!(store.memory_count(None).expect("count after insert"), 1);
+            assert_eq!(
+                store
+                    .search_text("Valle del Cauca", 5)
+                    .expect("keyword search")
+                    .len(),
+                1
+            );
+
+            let semantic_error = store
+                .search_semantic(&[], 5, None, None)
+                .expect_err("semantic search must fail in keyword-only mode");
+            assert!(semantic_error.to_string().contains("keyword-only"));
+
+            let vector_error = store
+                .put_memory(
+                    &MemoryItem::new("must not store zero vectors", MemoryType::Factual),
+                    &[0.0],
+                )
+                .expect_err("keyword-only mode rejects supplied vectors");
+            assert!(vector_error.to_string().contains("embeddings are disabled"));
+            assert_eq!(
+                store.memory_count(None).expect("count remains unchanged"),
+                1
+            );
+        }
+
+        {
+            let store = MemoryStore::open(&config, 0).expect("keyword-only store reopens");
+            assert_eq!(store.memory_count(None).expect("persisted count"), 1);
+            let hits = store
+                .search_text("Valle del Cauca", 5)
+                .expect("persisted keyword search");
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].content, "Our farm is in Valle del Cauca");
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn keyword_search_ranks_and_filters_current_memories() {
+        let config = StorageConfig {
+            in_memory: true,
+            embedding_dimensions: 0,
+            ..StorageConfig::default()
+        };
+        let store = MemoryStore::open(&config, 0).expect("keyword-only store opens");
+        let cauca = MemoryItem::new(
+            "Finca en Valle del Cauca: maíz, yuca y lengua-de-vaca.",
+            MemoryType::Factual,
+        );
+        let jose = MemoryItem::new(
+            "San José del Guaviare uses fermented coffee pulp as compost.",
+            MemoryType::Factual,
+        );
+        let plants = MemoryItem::new(
+            "Las plantas de moringa sirven como bioacumuladoras.",
+            MemoryType::Factual,
+        );
+        store.put_memory(&cauca, &[]).expect("add Cauca memory");
+        store
+            .put_memory(&jose, &[])
+            .expect("add accented place memory");
+        store
+            .put_memory(&plants, &[])
+            .expect("add plural plant memory");
+
+        let mixed_case = store
+            .search_text("vALLe dEl cAuCa", 3)
+            .expect("mixed-case search");
+        assert_eq!(mixed_case[0].id, cauca.id);
+        assert!(mixed_case[0].score.is_some());
+
+        let hyphenated = store
+            .search_text("lengua vaca", 3)
+            .expect("hyphen-normalized plant search");
+        assert_eq!(hyphenated[0].id, cauca.id);
+
+        let accented = store
+            .search_text("José", 3)
+            .expect("accented place-name search");
+        assert!(
+            accented.is_empty(),
+            "the current tokenizer does not match accented Spanish tokens"
+        );
+        assert_eq!(
+            store
+                .search_text("San", 3)
+                .expect("ASCII token in place name")[0]
+                .id,
+            jose.id
+        );
+
+        let plural = store
+            .search_text("plantas", 3)
+            .expect("plural farming-term search");
+        assert_eq!(plural[0].id, plants.id);
+        let singular = store
+            .search_text("planta", 3)
+            .expect("singular farming-term search");
+        assert_eq!(singular[0].id, plants.id);
+
+        assert!(
+            store
+                .search_text("!!!", 3)
+                .expect("empty sanitized query")
+                .is_empty(),
+            "punctuation-only queries return no results"
+        );
+        assert!(store
+            .search_text("Cauca", 0)
+            .expect("zero limit")
+            .is_empty());
+
+        store
+            .invalidate_memory(&jose.id)
+            .expect("invalidate accented place memory");
+        assert!(
+            store
+                .search_text("José", 3)
+                .expect("search after invalidation")
+                .is_empty(),
+            "invalidated memories are excluded from keyword search"
+        );
+    }
 }
