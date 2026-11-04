@@ -40,6 +40,8 @@ if [ "$tests" = 1 ]; then
   flutter test
 fi
 
+tool/check_native_libs.sh
+
 flutter build apk "--$mode" --flavor qwen35 "--dart-define=MODEL_SOURCE=$model_source"
 apk="build/app/outputs/flutter-apk/app-qwen35-$mode.apk"
 echo "built $apk"
