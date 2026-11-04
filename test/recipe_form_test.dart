@@ -1,3 +1,4 @@
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:natural_farming_chat/services/recipe_form.dart';
@@ -107,4 +108,32 @@ void main() {
       const ['Red Clover', 'Clove'],
     );
   });
+
+  test(
+    'form UI validates with the resolver and continues via the session API',
+    () {
+      final form = File('lib/widgets/recipe_form_tab.dart').readAsStringSync();
+      expect(form, contains('resolvePlant'));
+      expect(form, contains('resolveCrop'));
+      expect(form, contains('evaluateRecipeForm'));
+      expect(form, contains('Continue chat?'));
+      expect(form, isNot(contains('generateCompletionWithTools')));
+
+      // UI hint text must not carry example catalog values.
+      for (final example in [
+        'banana',
+        'onion',
+        'stinging nettle',
+        '25 m2',
+        'bioaccumulator recipe:',
+      ]) {
+        expect(form.toLowerCase(), isNot(contains(example)));
+      }
+
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main, contains('createSessionFromRecipe'));
+      expect(main, contains('RecipeFormTab'));
+      expect(main, contains('buildRecipeInstructionMessages'));
+    },
+  );
 }
