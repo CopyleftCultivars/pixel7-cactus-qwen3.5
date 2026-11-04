@@ -45,9 +45,15 @@ Building the APK also needs the Android SDK and NDK, and a Rust toolchain: the A
 
 ### Native libraries
 
-`libcactus.so` and `libcactus_util.so` (arm64-v8a) are not in git. Put them in `packages/cactus/android/src/main/jniLibs/arm64-v8a/`; `tool/check_native_libs.sh` (run by every build) compares them with `native_libs.sha256`, the build every benchmark and phone test so far used.
+`libcactus.so` and `libcactus_util.so` (arm64-v8a) are not in git. They are published as a release of the Cactus fork, and `native_libs.release` names the release this version of the app runs with:
 
-**Known gap:** those two binaries were built outside this repository and nothing records which `cactus-sdk` commit produced them. `cactus-sdk/android/build.sh` builds the engine from the submodule, but a library built that way has not been compared with the pinned one or run on the phone. Until it has, treat the recorded checksums, not the submodule, as the reference.
+```sh
+tool/fetch_native_libs.sh      # downloads into packages/cactus/android/src/main/jniLibs/arm64-v8a/ and checks native_libs.sha256
+```
+
+`tool/check_native_libs.sh` (run by every build) compares what is there with `native_libs.sha256`: the build every benchmark and phone test so far used. The release is tagged on the fork at the `cactus-sdk` commit this repository pins, and this repository's version tags (`v*`) say which release a given app version belongs to.
+
+**Known gap:** those two binaries were built outside this repository, and nothing records which commit produced them; the release is attached to the pinned commit because that is the fork state the app was developed against, not because the build was reproduced from it. `cactus-sdk/android/build.sh` builds the engine from the submodule, but a library built that way has not been compared with the released one or run on the phone. Until it has, the recorded checksums, not the submodule, are the reference.
 
 ### Build and install
 
