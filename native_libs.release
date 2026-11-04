@@ -1,0 +1,4 @@
+# The GitHub release (on the Cactus fork) that holds the prebuilt native libraries this app version runs with.
+# Sourced by tool/fetch_native_libs.sh. The files' SHA-256 are in native_libs.sha256.
+NATIVE_LIBS_REPO=CopyleftCultivars/cactus
+NATIVE_LIBS_TAG=android-arm64-qwen35-2026-11-04
