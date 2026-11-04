@@ -1,0 +1,54 @@
+# Flutter and Dart
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+app.*.symbols
+app.*.map.json
+**/doc/api/
+.flutter-plugins
+.packages
+migrate_working_dir/
+**/ios/Flutter/.last_build_id
+**/GeneratedPluginRegistrant.*
+local.properties
+.gradle/
+/android/app/debug
+/android/app/profile
+/android/app/release
+/android/captures/
+**/ephemeral/
+Generated.xcconfig
+
+# Native libraries are built or fetched, never committed (see README.md)
+packages/cactus/android/src/main/jniLibs/**/*.so
+
+# Rust build output of the vendored memlocal plugin
+third_party/memlocal_core/target/
+third_party/memlocal_core/flutter/rust/target/
+
+# Editors and OS
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+*.swp
+*.log
+*.class
+.history
+.svn/
+.swiftpm/
+.buildlog/
+.build/
+
+# Agent and tool state
+.claude/
+.chainlink/
+.mcp.json
+.codex/
+.agents/
+.env
