@@ -82,6 +82,10 @@ tool/build_release.sh --install                         # auto: pushed bundle if
 To test the real download against Hugging Face from a computer (about 1.1 GB):
 `HF_NETWORK_TEST=1 flutter test test/model_downloader_network_test.dart`.
 
+## Licenses
+
+The app code in this repository is under the license in `LICENSE`. The Cactus engine (`cactus-sdk/`, `packages/cactus/`, and the `libcactus` binaries) is under Cactus Compute's own license (`cactus-sdk/LICENSE`, shipped next to the released binaries): free for individuals using it non-commercially, for educational institutions and 501(c)(3) non-profits, and for organizations with under $2 million in funding and under $2 million in annual revenue; everyone else needs a commercial license from Cactus Compute, and anyone who redistributes it must keep the license text with it. memlocal (`third_party/memlocal_core/`) is Apache-2.0. The model is Apache-2.0 (see its Hugging Face cards).
+
 ## Tests
 
 `flutter test` runs the unit tests, including the golden files under `test/fixtures`. The on-device benchmark harness lives in the benchmark repository; it copies its own `integration_test` files into a disposable copy of this app.
