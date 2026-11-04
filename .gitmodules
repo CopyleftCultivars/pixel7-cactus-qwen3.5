@@ -1,0 +1,3 @@
+[submodule "cactus-sdk"]
+	path = cactus-sdk
+	url = git@github.com:CopyleftCultivars/cactus.git
