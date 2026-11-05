@@ -14,7 +14,7 @@ source native_libs.release
 dest=packages/cactus/android/src/main/jniLibs/arm64-v8a
 mkdir -p "$dest"
 
-if sha256sum --check --quiet native_libs.sha256 2>/dev/null; then
+if sha256sum --check --quiet native_libs.sha256 >/dev/null 2>&1; then
   echo "native libraries already match native_libs.sha256"
   exit 0
 fi
